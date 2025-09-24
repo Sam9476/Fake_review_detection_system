@@ -1,81 +1,63 @@
-# app.py
 import streamlit as st
-import joblib
 import re
+import pickle
+import nltk
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from nltk.tokenize import word_tokenize
-import nltk
-import numpy as np
-import pandas as pd
 
 # -----------------------------
 # NLTK setup
 # -----------------------------
-nltk.download('punkt')
-nltk.download('stopwords')
+nltk.download('punkt', quiet=True)
+nltk.download('stopwords', quiet=True)
+
 stemmer = PorterStemmer()
 stop_words = set(stopwords.words('english'))
 
 # -----------------------------
-# Load model & vectorizer
+# Load model and vectorizer
 # -----------------------------
-@st.cache_resource
-def load_model():
-    model = joblib.load("model.pkl")
-    tfidf = joblib.load("tfidf.pkl")
-    return model, tfidf
+with open("model.pkl", "rb") as f:
+    model = pickle.load(f)
 
-model, tfidf = load_model()
+with open("tfidf_vectorizer.pkl", "rb") as f:
+    tfidf_vectorizer = pickle.load(f)
 
 # -----------------------------
-# Preprocessing
+# Text preprocessing
 # -----------------------------
 def clean_text(text):
-    text = str(text).lower()
-    text = re.sub(r'[^\w\s]', '', text)
-    tokens = word_tokenize(text)
-    cleaned_tokens = [stemmer.stem(word) for word in tokens if word not in stop_words]
-    return ' '.join(cleaned_tokens)
+    text = text.lower()  # lowercase
+    text = re.sub(r'[^\w\s]', '', text)  # remove punctuation
+    tokens = word_tokenize(text)  # tokenize
+    tokens = [stemmer.stem(word) for word in tokens if word not in stop_words]  # remove stopwords + stem
+    return ' '.join(tokens)
 
 # -----------------------------
-# Predict single review
+# Prediction
 # -----------------------------
 def predict_single(review, threshold=0.5):
     cleaned = clean_text(review)
-    features = tfidf.transform([cleaned])
-    proba = model.predict_proba(features)[0, 1]
+    features = tfidf_vectorizer.transform([cleaned])
+    proba = model.predict_proba(features)[0][1]  # probability of being FAKE
     label = "FAKE" if proba >= threshold else "REAL"
     return label, proba
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.set_page_config(page_title="Fake Review Detector", layout="centered")
-st.title("🛡️ Fake Review Detection System")
+st.title("Fake Review Detection System")
+st.write("Enter a review below to check if it is REAL or FAKE:")
 
-review_text = st.text_area("Enter your review here:", height=200)
-threshold = st.slider("Fake Probability Threshold", 0.0, 1.0, 0.5)
+review_text = st.text_area("Your Review:")
+
+threshold = st.slider("FAKE Probability Threshold", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
 
 if st.button("Predict"):
     if review_text.strip() == "":
-        st.warning("Please enter a review.")
+        st.warning("Please enter a review first!")
     else:
         label, proba = predict_single(review_text, threshold)
-        st.subheader("Prediction Result")
-        st.write(f"**Label:** {label}")
-        st.write(f"**Probability of being fake:** {proba:.3f}")
-
-        # Optional: top contributing tokens
-        try:
-            features = tfidf.transform([clean_text(review_text)])
-            coefs = model.coef_[0]
-            feature_array = np.array(tfidf.get_feature_names_out())
-            contrib = features.toarray()[0] * coefs
-            top_idx = np.argsort(contrib)[-10:][::-1]
-            top_tokens = feature_array[top_idx]
-            top_scores = contrib[top_idx]
-            st.write("Top contributing tokens (approx.):")
-            st.table(pd.DataFrame({"Token": top_tokens, "Score": top_scores}))
-        except Exception as e:
-            st.write("Could not compute token contributions:", e)
+        st.success(f"Prediction: {label}")
+        st.info(f"Probability of being FAKE: {proba:.2f}")
