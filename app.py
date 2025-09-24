@@ -7,7 +7,70 @@ import joblib
 import os
 import tempfile
 
+# -----------------------------import streamlit as st
+import numpy as np
+import re
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize
+import nltk
+import joblib
+
 # -----------------------------
+# NLTK setup
+# -----------------------------
+nltk.download('punkt')
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
+stemmer = PorterStemmer()
+
+# -----------------------------
+# Load model
+# -----------------------------
+@st.cache_data
+def load_model(path="fake_review_model.joblib"):
+    return joblib.load(path)
+
+model = load_model()
+
+# -----------------------------
+# Text preprocessing
+# -----------------------------
+def clean_text(text):
+    text = text.lower()  # lowercase
+    text = re.sub(r'[^a-z\s]', '', text)  # remove punctuation/numbers
+    tokens = word_tokenize(text)
+    tokens = [stemmer.stem(word) for word in tokens if word not in stop_words]
+    return " ".join(tokens)
+
+# -----------------------------
+# Prediction function
+# -----------------------------
+def predict_single(review, threshold=0.5):
+    cleaned = clean_text(review)
+    # Assuming model expects a list of texts
+    proba = model.predict_proba([cleaned])[0][1]  # probability of being fake
+    label = "FAKE" if proba >= threshold else "REAL"
+    return label, proba
+
+# -----------------------------
+# Streamlit app
+# -----------------------------
+st.title("Fake Review Detection System")
+st.write("Enter a review and check if it is REAL or FAKE:")
+
+review_text = st.text_area("Review Text", "")
+
+threshold = st.slider("Probability threshold", 0.0, 1.0, 0.5)
+
+if st.button("Predict"):
+    if review_text.strip() == "":
+        st.warning("Please enter a review text!")
+    else:
+        label, proba = predict_single(review_text, threshold)
+        st.success(f"Prediction: {label}")
+        st.info(f"Probability of being FAKE: {proba:.2f}")
+
 # NLTK setup for deployment
 # -----------------------------
 # Use a temporary directory for NLTK data
