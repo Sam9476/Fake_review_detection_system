@@ -1,19 +1,31 @@
 import streamlit as st
-import numpy as np
-import pandas as pd
 import nltk
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 from nltk.tokenize import word_tokenize
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
 import joblib
+import os
+import tempfile
 
 # -----------------------------
-# NLTK setup
+# NLTK setup for deployment
 # -----------------------------
-nltk.download('punkt')
-nltk.download('stopwords')
+# Use a temporary directory for NLTK data
+nltk_data_dir = os.path.join(tempfile.gettempdir(), "nltk_data")
+os.makedirs(nltk_data_dir, exist_ok=True)
+nltk.data.path.append(nltk_data_dir)
+
+# Download resources into temp directory if not already present
+try:
+    nltk.data.find("tokenizers/punkt")
+except LookupError:
+    nltk.download("punkt", download_dir=nltk_data_dir)
+
+try:
+    nltk.data.find("corpora/stopwords")
+except LookupError:
+    nltk.download("stopwords", download_dir=nltk_data_dir)
+
 stemmer = PorterStemmer()
 stop_words = set(stopwords.words('english'))
 
