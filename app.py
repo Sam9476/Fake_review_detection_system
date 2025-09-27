@@ -1,30 +1,43 @@
 import streamlit as st
 import joblib
 import re
-from nltk.corpus import stopwords
-from nltk.stem import PorterStemmer
-from nltk.tokenize import word_tokenize
-import nltk
-from langdetect import detect, LangDetectException
 import os
+import nltk
 
 # --- NLTK Configuration (Uses Local Folder) ---
 # Set the NLTK data path to the local directory
-nltk_data_path = 'nltk_data'
-nltk.data.path.append(nltk_data_path)
+nltk_data_path = os.path.join(os.getcwd(), 'nltk_data')
+if nltk_data_path not in nltk.data.path:
+    nltk.data.path.append(nltk_data_path)
 
-# Initialize stemmer and stop words (English specific)
+# 2. Imports that rely on NLTK data MUST be inside the try/except block.
 try:
-    # Stop words are loaded from the local folder
+    from nltk.corpus import stopwords
+    from nltk.stem import PorterStemmer
+    from nltk.tokenize import word_tokenize
+    
+    # Initialize stemmer and stop words (English specific)
     stemmer = PorterStemmer()
     stop_words = set(stopwords.words('english'))
+    
 except LookupError:
-    st.error("NLTK data not found locally. Ensure the 'nltk_data' folder is uploaded.")
-    stop_words = set() # Set empty to prevent immediate crash
+    # If data is missing (e.g., 'punkt' or 'stopwords'), raise an error
+    st.error("NLTK Data Error: Required data (punkt/stopwords) not found. "
+             "Ensure the 'nltk_data' folder is uploaded with the correct internal structure.")
+    
+    # Set variables to None/empty to prevent crashes and halt prediction logic
+    stemmer = None
+    stop_words = set()
+    model = None 
+    tfidf_vectorizer = None 
 
+# --- Preprocessing Function ---
 
 def clean_text(text):
     """Applies the exact cleaning and stemming logic used during training."""
+    if not stemmer: # Check if initialization failed
+        return text 
+
     # Convert to lowercase
     text = text.lower()
     # Remove punctuation
@@ -40,6 +53,7 @@ def clean_text(text):
 def load_assets():
     """Loads the trained model and TF-IDF vectorizer."""
     try:
+        # NOTE: Model and vectorizer loading is only attempted if NLTK initialization succeeded
         model = joblib.load('model.joblib')
         vectorizer = joblib.load('tfidf.joblib')
         return model, vectorizer
@@ -47,7 +61,11 @@ def load_assets():
         st.error("Error: Model or Vectorizer files not found. Ensure 'model.joblib' and 'tfidf.joblib' are in the same directory.")
         return None, None
 
-model, tfidf_vectorizer = load_assets()
+# Load assets only if NLTK data was successfully initialized
+if 'stemmer' in locals() and stemmer:
+    model, tfidf_vectorizer = load_assets()
+else:
+    model, tfidf_vectorizer = None, None
 
 # --- Streamlit Application Interface ---
 st.set_page_config(page_title="Fake Review Detector", layout="wide")
@@ -67,14 +85,6 @@ if model and tfidf_vectorizer:
 
     if st.button("Detect Spam/Fake Review", type="primary"):
         if review_input:
-            
-            # --- Language Check ---
-            try:
-                language = detect(review_input)
-                if language != 'en':
-                    st.warning(f"⚠️ **Language Warning:** Detected language is '{language}'. The model is trained ONLY on English and predictions may be unreliable.")
-            except LangDetectException:
-                st.warning("⚠️ Could not reliably detect the language of the review. Proceeding.")
             
             # --- Prediction Logic ---
             with st.spinner('Analyzing review...'):
