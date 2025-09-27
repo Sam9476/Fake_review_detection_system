@@ -1,369 +1,154 @@
 import streamlit as st
 import joblib
-import json
 import re
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-import nltk
-import base64
 import os
-import sys
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
 
-# --- NLTK Configuration (Use Local Folder) ---
-# Assuming 'nltk_data' folder is uploaded. Append path before any NLTK usage.
-# If you are using the 'download_nltk_data' function (below) instead, this block is optional,
-# but using the local folder is faster.
+# --- NLTK Configuration (Uses Local Folder for speed) ---
+# Set the path to the uploaded 'nltk_data' folder
 nltk_data_path = os.path.join(os.getcwd(), 'nltk_data')
 if nltk_data_path not in nltk.data.path:
     nltk.data.path.append(nltk_data_path)
 
-# Download NLTK data if needed (If local folder fails, uncomment nltk.download)
-@st.cache_resource
-def download_nltk_data():
-    try:
-        # Check if resources are available in the local folder
-        nltk.data.find('tokenizers/punkt')
-        nltk.data.find('corpora/stopwords')
-    except LookupError:
-        # If local folder is not found/incomplete, fall back to downloading (slow)
-        try:
-            nltk.download('stopwords', quiet=True)
-            nltk.download('punkt', quiet=True)
-        except Exception:
-            # If download fails, the app will continue but may crash later
-            pass
+# Check and Initialize NLTK components
+try:
+    # Explicitly find 'stopwords' resource
+    nltk.data.find('corpora/stopwords')
+    
+    # Initialize stemmer and stop words
+    stemmer = PorterStemmer()
+    stop_words = set(stopwords.words('english'))
+    is_nltk_ready = True
 
-# Load the trained model
-@st.cache_resource
-def load_model():
-    try:
-        # Ensure your model file is named spam_detection_model.pkl
-        model = joblib.load('spam_detection_model.pkl')
-        # Ensure your model info file is named model_info.json
-        with open('model_info.json', 'r') as f:
-            model_info = json.load(f)
-        return model, model_info
-    except FileNotFoundError:
-        st.error("Model files ('spam_detection_model.pkl' or 'model_info.json') not found! Please train the model and save the files.")
-        return None, None
-    except Exception as e:
-        st.error(f"Error loading model assets: {e}")
-        return None, None
+except LookupError:
+    st.error(
+        "NLTK DATA ERROR: Failed to locate 'stopwords' in the 'nltk_data' folder. "
+        "Prediction is disabled. Please ensure the folder is uploaded and structured correctly."
+    )
+    stemmer = None
+    stop_words = set()
+    is_nltk_ready = False
+    
+# --- Preprocessing Function (Manual Tokenization to avoid Punkt error) ---
 
-# Enhanced text preprocessing function (same as training)
-def preprocess_text(text):
-    """Clean and preprocess text data with enhanced features"""
+def clean_text(text):
+    """
+    Applies cleaning, stemming, and manual tokenization 
+    to ensure feature consistency with the training phase.
+    """
+    if not is_nltk_ready:
+        return text 
+
+    # 1. Convert to lowercase
     text = text.lower()
     
-    # Keep some punctuation patterns that might be useful for spam detection
-    text = re.sub(r'!{2,}', ' MULTIPLE_EXCLAMATION ', text)
-    text = re.sub(r'\?{2,}', ' MULTIPLE_QUESTION ', text)
+    # 2. Aggressive Cleaning: Remove anything that is NOT a letter or space.
+    text = re.sub(r'[^a-z\s]', '', text) 
     
-    # Mark ALL CAPS words (common in spam)
-    text = re.sub(r'\b[A-Z]{3,}\b', ' ALLCAPS_WORD ', text)
+    # 3. Tokenize using split() 
+    tokens = text.split() 
     
-    # Mark URLs and emails
-    text = re.sub(r'http[s]?://\S+', ' URL_LINK ', text)
-    text = re.sub(r'\S+@\S+', ' EMAIL_ADDRESS ', text)
+    # 4. Remove stop words and stem
+    cleaned_tokens = [
+        stemmer.stem(word) 
+        for word in tokens 
+        if word not in stop_words and len(word) > 1 
+    ]
     
-    # Mark numbers but keep them as NUMBER token
-    text = re.sub(r'\d+', ' NUMBER ', text)
-    
-    # Remove most punctuation but keep sentence structure
-    text = re.sub(r'[^\w\s!?.]', ' ', text)
-    text = re.sub(r'[!?.]', ' ', text)
-    
-    # Remove extra whitespace
-    text = ' '.join(text.split())
-    
-    return text
+    return ' '.join(cleaned_tokens)
 
-# Function to set background image with container
-def set_background(image_path):
-    """Set background image for the app with styled container and white text, black input text"""
+# --- Load Assets (Cached for Efficiency) ---
+@st.cache_resource
+def load_assets():
+    """Loads the trained model and TF-IDF vectorizer."""
     try:
-        with open(image_path, "rb") as image_file:
-            encoded_string = base64.b64encode(image_file.read())
-        
-        st.markdown(
-            f"""
-            <style>
-            .stApp {{
-                background: linear-gradient(
-                    rgba(0, 0, 0, 0.5),   /* Dark overlay (50% opacity) */
-                    rgba(0, 0, 0, 0.5)
-                ),
-                url(data:image/{"png"};base64,{encoded_string.decode()});
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
-                background-attachment: fixed;
-                color: white !important;
-            }}
-            .main-content {{
-                background-color: rgba(255, 255, 255, 0.1);
-                padding: 2rem;
-                border-radius: 10px;
-                margin: 1rem 0;
-                color: white !important;
-            }}
-            .prediction-box {{
-                background-color: rgba(255, 255, 255, 0.15);
-                padding: 1.5rem;
-                border-radius: 10px;
-                margin: 1rem 0;
-                border-left: 5px solid #1f77b4;
-                color: white !important;
-            }}
-            .spam-alert {{
-                background-color: rgba(255, 0, 0, 0.2);
-                border-left: 5px solid #ff4444;
-                color: white !important;
-            }}
-            .safe-alert {{
-                background-color: rgba(0, 255, 0, 0.2);
-                border-left: 5px solid #44ff44;
-                color: white !important;
-            }}
-            /* Make all text white */
-            .stApp, .stApp * , h1, h2, h3, h4, h5, h6, p, div, span {{
-                color: white !important;
-            }}
-            /* Reset sidebar text back to black */
-            section[data-testid="stSidebar"] *, 
-            section[data-testid="stSidebar"] div, 
-            section[data-testid="stSidebar"] span {{
-                color: black !important;
-            }}
-            /* Force input text (textarea, input, select) to black */
-            .stTextArea textarea, 
-            .stTextInput input, 
-            .stSelectbox select {{
-                color: black !important;
-                background-color: rgba(255, 255, 255, 0.8) !important;
-            }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
+        # Assumes model is 'model.joblib' and vectorizer is 'tfidf.joblib'
+        model = joblib.load('model.joblib')
+        vectorizer = joblib.load('tfidf.joblib')
+        return model, vectorizer
     except FileNotFoundError:
-        st.warning(f"Background image '{image_path}' not found. Using default Streamlit background.")
-    except Exception as e:
-        st.error(f"Error setting custom background: {e}")
+        st.error("Error: Model or Vectorizer files not found. Ensure 'model.joblib' and 'tfidf.joblib' are in the same directory.")
+        return None, None
 
-def main():
-    # Set page config
-    st.set_page_config(
-        page_title="Fake Review Detection System",
-        page_icon="🛡️",
-        layout="wide",
-        initial_sidebar_state="collapsed"
+# Load assets only if NLTK data was successfully initialized
+if 'is_nltk_ready' in locals() and is_nltk_ready:
+    model, tfidf_vectorizer = load_assets()
+else:
+    model, tfidf_vectorizer = None, None
+
+# --- Streamlit Application Interface ---
+st.set_page_config(page_title="Fake Review Detector", layout="wide")
+st.title("🛡️ Web Hosting Review Detection System")
+st.markdown("A Machine Learning model trained to classify reviews as **Genuine (OR)** or **Fake/Deceptive (CG)**.")
+st.markdown("---")
+
+if model and tfidf_vectorizer:
+    
+    st.header("Analyze a Review")
+    
+    review_input = st.text_area(
+        "Paste the review text below:", 
+        height=200, 
+        placeholder="e.g., 'This service is fast and reliable, five stars all the way!' or 'Worst host ever, zero support, totally deceptive.'"
     )
     
-    # Set background
-    # Ensure 'background.jpg' is in your repository root
-    set_background("background.jpg")
-    
-    # Download NLTK data (or check local folder)
-    download_nltk_data()
-    
-    # Load model
-    model, model_info = load_model()
-    
-    if model is None:
-        st.stop()
-    
-    # Main content
-    st.markdown('<div class="main-content">', unsafe_allow_html=True)
-    
-    # Header
-    st.title("🛡️ Fake Review Detection System")
-    st.markdown("---")
-    
-    # Sidebar with model info
-    with st.sidebar:
-        st.header("📊 Model Information")
-        st.info(f"**Algorithm:** {model_info.get('model_name', 'Unknown')}")
-        st.info(f"**Accuracy:** {model_info.get('accuracy', 0):.1%}")
-        st.info(f"**Features:** {model_info.get('max_features', 'Unknown')}")
-        
-        st.header("🎯 How it works")
-        st.write("""
-        1. **Input:** Enter your text/review
-        2. **Processing:** Text is cleaned and vectorized
-        3. **Prediction:** ML model analyzes patterns
-        4. **Result:** Get spam probability with confidence
-        """)
-        
-        st.header("📈 Model Stats")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Accuracy", f"{model_info.get('accuracy', 0):.1%}")
-        with col2:
-            st.metric("Model Type", "ML Pipeline")
-    
-    # Main interface
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("📝 Enter Text to Analyze")
-        
-        # Text input options
-        input_method = st.radio(
-            "Choose input method:",
-            ["Type text", "Upload file", "Use examples"],
-            key="input_method" # Add key for robustness
-        )
-        
-        user_text = ""
-        
-        if input_method == "Type text":
-            user_text = st.text_area(
-                "Enter your text here:",
-                height=150,
-                placeholder="Paste your text, review, or message here...",
-                key="type_text"
-            )
-        
-        elif input_method == "Upload file":
-            uploaded_file = st.file_uploader(
-                "Upload a text file",
-                type=['txt'],
-                help="Upload a .txt file to analyze",
-                key="upload_file"
-            )
-            if uploaded_file is not None:
-                user_text = str(uploaded_file.read(), "utf-8")
-                st.text_area("File content:", user_text, height=100, disabled=True)
-        
-        elif input_method == "Use examples":
-            examples = {
-                "Suspicious Review": "This host is AMAZING!!! Best deal ever! Book now and get 90% discount! Limited time offer!",
-                "Genuine Review": "I used this service last week. The platform was easy to navigate and the support staff was helpful. The location is convenient.",
-                "Spam-like": "URGENT! You won a million dollars! Click here now! Don't miss this incredible opportunity!",
-                "Normal Text": "The team meeting was informative and well-organized. The presentation provided valuable insights into current market trends."
-            }
+    st.caption("⚠️ Note: Model trained on English data. Results may be unreliable for other languages.")
+
+    if st.button("Detect Spam/Fake Review", type="primary"):
+        if review_input:
             
-            selected_example = st.selectbox("Choose an example:", list(examples.keys()), key="select_example")
-            user_text = examples[selected_example]
-            st.text_area("Selected example:", user_text, height=100, disabled=True)
-    
-    with col2:
-        st.subheader("⚙️ Analysis Settings")
-        
-        show_confidence = st.checkbox("Show confidence score", value=True)
-        show_processing = st.checkbox("Show text processing", value=False)
-        
-        st.subheader("📊 Quick Stats")
-        if user_text:
-            st.metric("Characters", len(user_text))
-            st.metric("Words", len(user_text.split()))
-            st.metric("Lines", len(user_text.split('\n')))
-    
-    # Analysis button and results
-    if st.button("🔍 Analyze Text", type="primary", use_container_width=True):
-        if user_text.strip():
-            with st.spinner("Analyzing text..."):
-                # Preprocess text
-                cleaned_text = preprocess_text(user_text)
+            # --- Prediction Logic ---
+            with st.spinner('Analyzing review...'):
                 
-                # Make prediction
-                prediction = model.predict([cleaned_text])[0]
-                probabilities = model.predict_proba([cleaned_text])[0]
+                cleaned_input = clean_text(review_input)
+                vectorized_input = tfidf_vectorizer.transform([cleaned_input])
                 
-                # Assume 'deceptive' is class 1 and 'legitimate' is class 0 (CHECK YOUR MODEL'S CLASSES)
-                # If model.classes_ is ['legitimate', 'deceptive'], then 'deceptive' is index 1.
-                spam_prob_index = 1 if 'deceptive' in model.classes_ else 0 
-                legit_prob_index = 1 - spam_prob_index
+                # Predict (1=Fake/CG, 0=Genuine/OR)
+                prediction = model.predict(vectorized_input)[0]
                 
-                spam_prob = probabilities[spam_prob_index]
-                legit_prob = probabilities[legit_prob_index]
+                # Get probabilities for both classes
+                try:
+                    probabilities = model.predict_proba(vectorized_input)[0]
+                    confidence_score = probabilities[prediction]
+                    
+                    # Prepare display variables
+                    is_fake = prediction == 1
+                    status_emoji = "❌" if is_fake else "✅"
+                    status_text = "FAKE/DECEPTIVE REVIEW (CG)" if is_fake else "GENUINE REVIEW (OR)"
+                    
+                except:
+                    confidence_score = None
+                    status_emoji = ""
+                    status_text = "Prediction Error"
+                    
+                st.markdown("### Analysis Result:")
                 
-                # Determine result based on the highest probability
-                is_spam = prediction == 'deceptive'
+                # --- FINAL DISPLAY FIX: Use st.metric for guaranteed percentage display ---
                 
-                # Display results
-                st.markdown("---")
-                st.subheader("📊 Analysis Results")
-                
-                # Main result box (CSS styling for visibility)
-                result_class = "spam-alert" if is_spam else "safe-alert"
-                result_emoji = "🚨" if is_spam else "✅"
-                result_text = "SPAM DETECTED" if is_spam else "LEGITIMATE TEXT"
-                result_color = "red" if is_spam else "green"
-                
-                # Display the main prediction and its probability
-                st.markdown(
-                    f"""
-                    <div class="prediction-box {result_class}">
-                        <h2 style="color: {result_color}; text-align: center;">
-                            {result_emoji} {result_text}
-                        </h2>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-                
-                # Detailed results
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
+                if confidence_score is not None:
+                    # Display the main prediction and confidence using st.metric
                     st.metric(
-                        "Prediction",
-                        prediction.title(),
-                        delta="Spam" if is_spam else "Safe"
+                        # Label includes the emoji and status text
+                        label=f"{status_emoji} **{status_text}**", 
+                        # Value shows the percentage
+                        value=f"{confidence_score * 100:.2f}%", 
+                        delta_color="off" 
                     )
-                
-                with col2:
-                    st.metric(
-                        "Spam Probability",
-                        f"{spam_prob:.2%}",
-                        delta_color="off" # The label itself is clear enough
-                    )
-                
-                with col3:
-                    risk_level = "HIGH" if spam_prob > 0.8 else "MEDIUM" if spam_prob > 0.5 else "LOW"
-                    st.metric("Risk Level", risk_level)
-                
-                # Show processing details if requested
-                if show_processing:
-                    st.subheader("🔧 Text Processing Details")
-                    st.text_area("Original text:", user_text, height=100, disabled=True)
-                    st.text_area("Processed text:", cleaned_text, height=100, disabled=True)
-                
-                # Enhanced recommendations (removed rating variables)
-                st.subheader("💡 Recommendations")
-                if is_spam:
-                    st.warning("""
-                    **⚠️ This text appears to be spam or deceptive. Consider:**
-                    - Verify the source before trusting
-                    - Look for unrealistic claims or urgent language
-                    - Check for spelling/grammar issues (often missed in spam)
-                    - Be cautious of unsolicited offers
-                    """)
+                    
+                    # Display the counter-probability for full transparency
+                    opposite_class = 1 - prediction
+                    opposite_score = probabilities[opposite_class]
+                    
+                    # Determine the label for the opposite class
+                    opposite_label = 'Fake (CG)' if opposite_class == 1 else 'Genuine (OR)'
+                    st.caption(f"Confidence for the opposing class ({opposite_label}): **{opposite_score * 100:.2f}%**")
                 else:
-                    st.success("""
-                    **✅ This text appears to be legitimate. However:**
-                    - Always use your judgment
-                    - Verify important information from multiple sources
-                    - Be aware that sophisticated spam can be harder to detect
-                    """)
-                
-        else:
-            st.error("Please enter some text to analyze!")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Footer
-    st.markdown("---")
-    st.markdown(
-        """
-        <div style="text-align: center; color: #666;">
-            <p>🛡️ Spam Detection System | Built with Streamlit & Machine Learning</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+                    st.warning("Could not calculate confidence score. Check your model's prediction output.")
 
-if __name__ == "__main__":
-    main()
+        else:
+            st.warning("👈 Please enter a review to begin the analysis.")
+
+st.markdown("---")
+st.caption("Model: Logistic Regression | Features: TF-IDF with Porter Stemming")
