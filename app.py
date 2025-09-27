@@ -4,127 +4,95 @@ import re
 import os
 import nltk
 
-# --- NLTK Configuration (CRITICAL FIX FOR LookupError) ---
+# ----------------------------
+# 1. NLTK CONFIGURATION
+# ----------------------------
 
-# 1. Point NLTK to the uploaded 'nltk_data' folder
+# Point NLTK to the uploaded 'nltk_data' folder
 nltk_data_path = os.path.join(os.getcwd(), 'nltk_data')
 if nltk_data_path not in nltk.data.path:
     nltk.data.path.append(nltk_data_path)
 
-# 2. Explicitly load the required NLTK data resources before importing components.
-# This ensures NLTK finds the models using the custom path.
-try:
-    # Attempt to find the necessary files. If they fail, the LookupError is raised here.
-    nltk.data.find('tokenizers/punkt')
-    nltk.data.find('corpora/stopwords')
-    
-    # Now import the components that rely on the found data
-    from nltk.corpus import stopwords
-    from nltk.stem import PorterStemmer
-    from nltk.tokenize import word_tokenize
-    
-    # Initialize stemmer and stop words
-    stemmer = PorterStemmer()
-    stop_words = set(stopwords.words('english'))
-    
-    # Flag to indicate successful initialization
-    is_nltk_ready = True
+# Import NLTK components safely
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize
 
-except LookupError:
-    # Handle the case where the NLTK data is not found
-    st.error("NLTK Data Error: Could not find 'punkt' or 'stopwords' in the 'nltk_data' folder. "
-             "Please ensure the folder is complete and structured correctly (e.g., nltk_data/tokenizers/punkt).")
-    
-    # Disable prediction logic
-    stemmer = None
-    stop_words = set()
-    is_nltk_ready = False
-    
-# --- Preprocessing Function ---
+# Initialize stemmer and stopwords
+stemmer = PorterStemmer()
+stop_words = set(stopwords.words('english'))
 
+# ----------------------------
+# 2. TEXT PREPROCESSING
+# ----------------------------
 def clean_text(text):
-    """Applies the exact cleaning and stemming logic used during training."""
-    if not is_nltk_ready:
-        return text # Return original text if cleaning failed
-
-    # Convert to lowercase
+    """Cleans and stems text exactly like during training."""
     text = text.lower()
-    # Remove punctuation
-    text = re.sub(r'[^\w\s]', '', text)
-    # Tokenize (This line caused the error, now protected by explicit find())
+    text = re.sub(r'[^\w\s]', '', text)  # remove punctuation
     tokens = word_tokenize(text)
-    # Remove stop words and stem
     cleaned_tokens = [stemmer.stem(word) for word in tokens if word not in stop_words]
     return ' '.join(cleaned_tokens)
 
-# --- Load Assets (Cached for Efficiency) ---
+# ----------------------------
+# 3. LOAD MODEL AND VECTORIZER
+# ----------------------------
 @st.cache_resource
 def load_assets():
-    """Loads the trained model and TF-IDF vectorizer."""
+    """Load the trained model and TF-IDF vectorizer."""
     try:
         model = joblib.load('model.joblib')
         vectorizer = joblib.load('tfidf.joblib')
         return model, vectorizer
     except FileNotFoundError:
-        st.error("Error: Model or Vectorizer files not found. Ensure 'model.joblib' and 'tfidf.joblib' are in the same directory.")
+        st.error("Error: Model or Vectorizer files not found. Ensure 'model.joblib' and 'tfidf.joblib' are uploaded.")
         return None, None
 
-# Load assets only if NLTK data was successfully initialized
-if is_nltk_ready:
-    model, tfidf_vectorizer = load_assets()
-else:
-    model, tfidf_vectorizer = None, None
+model, tfidf_vectorizer = load_assets()
 
-# --- Streamlit Application Interface ---
+# ----------------------------
+# 4. STREAMLIT UI
+# ----------------------------
 st.set_page_config(page_title="Fake Review Detector", layout="wide")
 st.title("🛡️ Web Hosting Fake Review Detection System")
-st.markdown("A Machine Learning model trained to classify English reviews as Genuine (OR) or Fake (CG).")
+st.markdown("Classify reviews as Genuine (OR) or Fake/Deceptive (CG).")
 st.markdown("---")
 
 if model and tfidf_vectorizer:
-    
     st.header("Analyze a Review")
     
     review_input = st.text_area(
-        "Paste the review text below (English only):", 
+        "Paste the review text here (English reviews only):", 
         height=200, 
-        placeholder="e.g., 'This service is fast and reliable, five stars all the way!' or 'Worst host ever, zero support, totally deceptive.'"
+        placeholder="e.g., 'This service is fast and reliable!' or 'Worst host ever, totally deceptive.'"
     )
 
-    if st.button("Detect Spam/Fake Review", type="primary"):
-        if review_input:
-            
-            # --- Prediction Logic ---
-            with st.spinner('Analyzing review...'):
-                
-                # Preprocess input using the exact training function
+    if st.button("Detect Fake/Genuine Review"):
+        if review_input.strip():
+            with st.spinner("Analyzing review..."):
+                # Preprocess
                 cleaned_input = clean_text(review_input)
                 
-                # Vectorize (Transform using the fitted vectorizer)
+                # Vectorize
                 vectorized_input = tfidf_vectorizer.transform([cleaned_input])
                 
-                # Predict (1=Fake/CG, 0=Genuine/OR)
+                # Predict
                 prediction = model.predict(vectorized_input)[0]
                 
-                # Get probability for confidence score
+                # Probability / confidence
                 try:
                     probability = model.predict_proba(vectorized_input)[0][prediction]
                 except:
                     probability = None
-                    
+                
+                # Display result
                 st.markdown("### Analysis Result:")
-
                 if prediction == 1:
-                    st.error(f"❌ **PREDICTION: FAKE/DECEPTIVE REVIEW** (CG)")
+                    st.error("❌ PREDICTION: FAKE/DECEPTIVE REVIEW (CG)")
                 else:
-                    st.success(f"✅ **PREDICTION: GENUINE REVIEW** (OR)")
+                    st.success("✅ PREDICTION: GENUINE REVIEW (OR)")
                 
                 if probability is not None:
-                    st.metric(
-                        label="Confidence Score", 
-                        value=f"{probability * 100:.2f}%"
-                    )
-
+                    st.metric(label="Confidence Score", value=f"{probability * 100:.2f}%")
         else:
             st.warning("👈 Please enter a review to begin the analysis.")
 
