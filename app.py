@@ -1,12 +1,13 @@
 import streamlit as st
 import joblib
 import re
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
 import nltk
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize
 
 # -----------------------------
-# Download NLTK resources
+# Download NLTK data
 # -----------------------------
 @st.cache_resource
 def download_nltk_data():
@@ -19,7 +20,13 @@ def download_nltk_data():
 download_nltk_data()
 
 # -----------------------------
-# Load model and TF-IDF
+# Initialize stemmer and stop words
+# -----------------------------
+stemmer = PorterStemmer()
+stop_words = set(stopwords.words('english'))
+
+# -----------------------------
+# Load model and TF-IDF vectorizer
 # -----------------------------
 @st.cache_resource
 def load_model_files():
@@ -37,21 +44,14 @@ if tfidf is None or model is None:
     st.stop()
 
 # -----------------------------
-# Text preprocessing (same as notebook)
+# Preprocessing function
 # -----------------------------
-stop_words = set(stopwords.words('english'))
-
 def clean_text(text):
-    # Lowercase
     text = text.lower()
-    # Remove punctuation and numbers
-    text = re.sub(r'[^a-z\s]', '', text)
-    # Tokenize
+    text = re.sub(r'[^\w\s]', '', text)  # remove punctuation
     tokens = word_tokenize(text)
-    # Remove stopwords
-    tokens = [word for word in tokens if word not in stop_words]
-    # Join back to string
-    return ' '.join(tokens)
+    cleaned_tokens = [stemmer.stem(word) for word in tokens if word not in stop_words]
+    return ' '.join(cleaned_tokens)
 
 # -----------------------------
 # Prediction function
