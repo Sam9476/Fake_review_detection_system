@@ -33,15 +33,12 @@ except LookupError:
     stop_words = set()
     is_nltk_ready = False
     
-# --- Preprocessing Function (Checked and Refined) ---
+# --- Preprocessing Function (Manual Tokenization) ---
 
 def clean_text(text):
     """
     Applies cleaning, stemming, and uses manual tokenization 
     to avoid the problematic nltk.word_tokenize (punkt dependency).
-    
-    CRITICAL CHECK: This logic MUST exactly match the training script's logic 
-    to prevent feature drift and misclassification.
     """
     if not is_nltk_ready:
         return text 
@@ -49,8 +46,7 @@ def clean_text(text):
     # 1. Convert to lowercase
     text = text.lower()
     
-    # 2. Aggressive Cleaning: Remove anything that is NOT a letter or space. 
-    # This standardizes the text exactly before tokenization.
+    # 2. Aggressive Cleaning: Remove anything that is NOT a letter or space.
     text = re.sub(r'[^a-z\s]', '', text) 
     
     # 3. Tokenize using split() 
@@ -60,7 +56,6 @@ def clean_text(text):
     cleaned_tokens = [
         stemmer.stem(word) 
         for word in tokens 
-        # Check against stop words and remove single-character tokens (usually noise)
         if word not in stop_words and len(word) > 1 
     ]
     
@@ -119,26 +114,22 @@ if model and tfidf_vectorizer:
                 # Get probabilities for both classes
                 try:
                     probabilities = model.predict_proba(vectorized_input)[0]
-                    # Get the probability corresponding to the predicted class (0 or 1)
-                    confidence_score = probabilities[prediction] 
+                    confidence_score = probabilities[prediction]
+                    confidence_str = f" ({confidence_score * 100:.2f}%)"
                 except:
                     confidence_score = None
+                    confidence_str = ""
                     
                 st.markdown("### Analysis Result:")
-
-                if prediction == 1:
-                    st.error(f"❌ **PREDICTION: FAKE/DECEPTIVE REVIEW** (CG)")
-                else:
-                    st.success(f"✅ **PREDICTION: GENUINE REVIEW** (OR)")
                 
+                # --- Display Result with Percentage ---
+                if prediction == 1:
+                    st.error(f"❌ **PREDICTION: FAKE/DECEPTIVE REVIEW (CG)**{confidence_str}")
+                else:
+                    st.success(f"✅ **PREDICTION: GENUINE REVIEW (OR)**{confidence_str}")
+                
+                # Display the counter-probability for full transparency
                 if confidence_score is not None:
-                    # Explicitly display the percentage for user inference
-                    st.metric(
-                        label=f"Confidence Score ({'CG' if prediction == 1 else 'OR'})", 
-                        value=f"{confidence_score * 100:.2f}%"
-                    )
-                    
-                    # Also show the counter-probability to give the full picture
                     opposite_class = 1 - prediction
                     opposite_score = probabilities[opposite_class]
                     st.caption(f"Confidence for the {'Genuine (OR)' if opposite_class == 0 else 'Fake (CG)'} class: **{opposite_score * 100:.2f}%**")
