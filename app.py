@@ -6,26 +6,24 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 
-# --- NLTK Configuration (Uses Local Folder - Fixed Tokenization) ---
+# --- NLTK Configuration (Uses Local Folder) ---
 
 # 1. Set the path to the uploaded 'nltk_data' folder
 nltk_data_path = os.path.join(os.getcwd(), 'nltk_data')
 if nltk_data_path not in nltk.data.path:
     nltk.data.path.append(nltk_data_path)
 
-# 2. CRITICAL FIX: Attempt to FIND the 'stopwords' resource.
-# We no longer need to find 'punkt' since we are using a custom tokenizer.
+# 2. Check and Initialize NLTK components
 try:
-    # Explicitly find 'stopwords'
+    # Explicitly find 'stopwords' resource
     nltk.data.find('corpora/stopwords')
     
-    # Initialize stemmer and stop words (English components are required by the model)
+    # Initialize stemmer and stop words
     stemmer = PorterStemmer()
     stop_words = set(stopwords.words('english'))
     is_nltk_ready = True
 
 except LookupError:
-    # If the LookupError persists, the uploaded folder structure for stopwords is incorrect.
     st.error(
         "NLTK DATA ERROR: Failed to locate 'stopwords' in the 'nltk_data' folder. "
         "Please ensure the folder contains the correct structure (e.g., 'nltk_data/corpora/stopwords')."
@@ -35,28 +33,36 @@ except LookupError:
     stop_words = set()
     is_nltk_ready = False
     
-# --- Preprocessing Function (Manual Tokenization Fix) ---
+# --- Preprocessing Function (Checked and Refined) ---
 
 def clean_text(text):
     """
     Applies cleaning, stemming, and uses manual tokenization 
     to avoid the problematic nltk.word_tokenize (punkt dependency).
+    
+    CRITICAL CHECK: This logic MUST exactly match the training script's logic 
+    to prevent feature drift and misclassification.
     """
     if not is_nltk_ready:
         return text 
 
-    # Convert to lowercase
+    # 1. Convert to lowercase
     text = text.lower()
     
-    # Remove punctuation and numbers (keep only letters and spaces)
+    # 2. Aggressive Cleaning: Remove anything that is NOT a letter or space. 
+    # This standardizes the text exactly before tokenization.
     text = re.sub(r'[^a-z\s]', '', text) 
     
-    # Tokenize using split() to avoid punkt dependency
-    # This creates tokens based on whitespace.
+    # 3. Tokenize using split() 
     tokens = text.split() 
     
-    # Remove stop words and stem
-    cleaned_tokens = [stemmer.stem(word) for word in tokens if word not in stop_words and len(word) > 1]
+    # 4. Remove stop words and stem
+    cleaned_tokens = [
+        stemmer.stem(word) 
+        for word in tokens 
+        # Check against stop words and remove single-character tokens (usually noise)
+        if word not in stop_words and len(word) > 1 
+    ]
     
     return ' '.join(cleaned_tokens)
 
@@ -110,12 +116,13 @@ if model and tfidf_vectorizer:
                 # Predict (1=Fake/CG, 0=Genuine/OR)
                 prediction = model.predict(vectorized_input)[0]
                 
-                # Get probability
+                # Get probabilities for both classes
                 try:
-                    # model.classes_ will determine if 0 or 1 is the index
-                    probability = model.predict_proba(vectorized_input)[0][prediction]
+                    probabilities = model.predict_proba(vectorized_input)[0]
+                    # Get the probability corresponding to the predicted class (0 or 1)
+                    confidence_score = probabilities[prediction] 
                 except:
-                    probability = None
+                    confidence_score = None
                     
                 st.markdown("### Analysis Result:")
 
@@ -124,11 +131,17 @@ if model and tfidf_vectorizer:
                 else:
                     st.success(f"✅ **PREDICTION: GENUINE REVIEW** (OR)")
                 
-                if probability is not None:
+                if confidence_score is not None:
+                    # Explicitly display the percentage for user inference
                     st.metric(
-                        label="Confidence Score", 
-                        value=f"{probability * 100:.2f}%"
+                        label=f"Confidence Score ({'CG' if prediction == 1 else 'OR'})", 
+                        value=f"{confidence_score * 100:.2f}%"
                     )
+                    
+                    # Also show the counter-probability to give the full picture
+                    opposite_class = 1 - prediction
+                    opposite_score = probabilities[opposite_class]
+                    st.caption(f"Confidence for the {'Genuine (OR)' if opposite_class == 0 else 'Fake (CG)'} class: **{opposite_score * 100:.2f}%**")
 
         else:
             st.warning("👈 Please enter a review to begin the analysis.")
