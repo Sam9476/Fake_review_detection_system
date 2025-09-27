@@ -1,73 +1,114 @@
 import streamlit as st
 import joblib
 import re
-import numpy as np
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize
+import nltk
+from langdetect import detect, LangDetectException
+import os
 
-# -----------------------------
-# Load model and TF-IDF vectorizer
-# -----------------------------
+# --- NLTK Configuration (Uses Local Folder) ---
+# Set the NLTK data path to the local directory
+nltk_data_path = 'nltk_data'
+nltk.data.path.append(nltk_data_path)
+
+# Initialize stemmer and stop words (English specific)
+try:
+    # Stop words are loaded from the local folder
+    stemmer = PorterStemmer()
+    stop_words = set(stopwords.words('english'))
+except LookupError:
+    st.error("NLTK data not found locally. Ensure the 'nltk_data' folder is uploaded.")
+    stop_words = set() # Set empty to prevent immediate crash
+
+
+def clean_text(text):
+    """Applies the exact cleaning and stemming logic used during training."""
+    # Convert to lowercase
+    text = text.lower()
+    # Remove punctuation
+    text = re.sub(r'[^\w\s]', '', text)
+    # Tokenize
+    tokens = word_tokenize(text)
+    # Remove stop words and stem
+    cleaned_tokens = [stemmer.stem(word) for word in tokens if word not in stop_words]
+    return ' '.join(cleaned_tokens)
+
+# --- Load Assets (Cached for Efficiency) ---
 @st.cache_resource
-def load_model_files():
+def load_assets():
+    """Loads the trained model and TF-IDF vectorizer."""
     try:
-        tfidf = joblib.load("tfidf.joblib")
-        model = joblib.load("model.joblib")
-        return tfidf, model
-    except Exception as e:
-        st.error(f"Error loading model files: {e}")
+        model = joblib.load('model.joblib')
+        vectorizer = joblib.load('tfidf.joblib')
+        return model, vectorizer
+    except FileNotFoundError:
+        st.error("Error: Model or Vectorizer files not found. Ensure 'model.joblib' and 'tfidf.joblib' are in the same directory.")
         return None, None
 
-tfidf, model = load_model_files()
+model, tfidf_vectorizer = load_assets()
 
-if tfidf is None or model is None:
-    st.stop()
+# --- Streamlit Application Interface ---
+st.set_page_config(page_title="Fake Review Detector", layout="wide")
+st.title("🛡️ Web Hosting Fake Review Detection System")
+st.markdown("A Machine Learning model trained to classify English reviews as Genuine (OR) or Fake (CG).")
+st.markdown("---")
 
-# -----------------------------
-# Text preprocessing function
-# -----------------------------
-def preprocess_text(text):
-    """Lowercase, remove punctuation, extra whitespace"""
-    text = text.lower()
-    text = re.sub(r'[^\w\s]', ' ', text)  # remove punctuation
-    text = re.sub(r'\d+', ' ', text)      # remove numbers
-    text = ' '.join(text.split())         # remove extra spaces
-    return text
+if model and tfidf_vectorizer:
+    
+    st.header("Analyze a Review")
+    
+    review_input = st.text_area(
+        "Paste the review text below (English only):", 
+        height=200, 
+        placeholder="e.g., 'This service is fast and reliable, five stars all the way!' or 'Worst host ever, zero support, totally deceptive.'"
+    )
 
-# -----------------------------
-# Prediction function
-# -----------------------------
-def predict_review(text):
-    cleaned_text = preprocess_text(text)
-    vect_text = tfidf.transform([cleaned_text])
-    pred = model.predict(vect_text)[0]
-    proba = model.predict_proba(vect_text).max()
-    return pred, proba
+    if st.button("Detect Spam/Fake Review", type="primary"):
+        if review_input:
+            
+            # --- Language Check ---
+            try:
+                language = detect(review_input)
+                if language != 'en':
+                    st.warning(f"⚠️ **Language Warning:** Detected language is '{language}'. The model is trained ONLY on English and predictions may be unreliable.")
+            except LangDetectException:
+                st.warning("⚠️ Could not reliably detect the language of the review. Proceeding.")
+            
+            # --- Prediction Logic ---
+            with st.spinner('Analyzing review...'):
+                
+                # Preprocess input using the exact training function
+                cleaned_input = clean_text(review_input)
+                
+                # Vectorize (Transform using the fitted vectorizer)
+                vectorized_input = tfidf_vectorizer.transform([cleaned_input])
+                
+                # Predict (1=Fake/CG, 0=Genuine/OR)
+                prediction = model.predict(vectorized_input)[0]
+                
+                # Get probability for confidence score
+                try:
+                    probability = model.predict_proba(vectorized_input)[0][prediction]
+                except:
+                    probability = None
+                    
+                st.markdown("### Analysis Result:")
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
-st.set_page_config(page_title="Fake Review Detection", layout="wide")
-st.title("🛡️ Fake Review Detection System")
+                if prediction == 1:
+                    st.error(f"❌ **PREDICTION: FAKE/DECEPTIVE REVIEW** (CG)")
+                else:
+                    st.success(f"✅ **PREDICTION: GENUINE REVIEW** (OR)")
+                
+                if probability is not None:
+                    st.metric(
+                        label="Confidence Score", 
+                        value=f"{probability * 100:.2f}%"
+                    )
 
-review_text = st.text_area("Enter the review text:", height=150)
-
-threshold = st.slider(
-    "Prediction threshold (confidence level to classify as fake)", 0.0, 1.0, 0.5, 0.05
-)
-
-if st.button("Predict"):
-    if review_text.strip() == "":
-        st.warning("Please enter a review text to analyze.")
-    else:
-        label, proba = predict_review(review_text)
-        is_fake = label == 1  # assuming 1 = fake, 0 = genuine
-
-        st.markdown("---")
-        st.subheader("Prediction Result")
-
-        if is_fake:
-            st.error(f"🚨 Fake Review Detected! (Confidence: {proba:.2%})")
         else:
-            st.success(f"✅ Genuine Review (Confidence: {proba:.2%})")
+            st.warning("👈 Please enter a review to begin the analysis.")
 
-        st.markdown("**Processed Text:**")
-        st.text(preprocess_text(review_text))
+st.markdown("---")
+st.caption("Model: Logistic Regression | Features: TF-IDF with Porter Stemming")
