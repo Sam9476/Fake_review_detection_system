@@ -115,29 +115,34 @@ if model and tfidf_vectorizer:
                 try:
                     probabilities = model.predict_proba(vectorized_input)[0]
                     confidence_score = probabilities[prediction]
-                    confidence_str = f" ({confidence_score * 100:.2f}%)"
+                    
+                    # Prepare display variables
+                    status_emoji = "❌" if prediction == 1 else "✅"
+                    status_text = "FAKE/DECEPTIVE REVIEW (CG)" if prediction == 1 else "GENUINE REVIEW (OR)"
+                    
                 except:
                     confidence_score = None
-                    confidence_str = ""
+                    status_emoji = ""
+                    status_text = "Prediction Error"
                     
                 st.markdown("### Analysis Result:")
                 
-                # --- Display Result with Percentage (FIXED using st.markdown) ---
+                # --- FINAL DISPLAY FIX: Use st.metric for guaranteed percentage display ---
                 
-                if prediction == 1:
-                    # Use st.markdown with danger styling (red text) for visibility
-                    output_text = f"<p style='font-size: 20px; color: red;'>❌ <b>PREDICTION: FAKE/DECEPTIVE REVIEW (CG)</b>{confidence_str}</p>"
-                else:
-                    # Use st.markdown with success styling (green text)
-                    output_text = f"<p style='font-size: 20px; color: green;'>✅ <b>PREDICTION: GENUINE REVIEW (OR)</b>{confidence_str}</p>"
-                
-                st.markdown(output_text, unsafe_allow_html=True)
-                
-                # Display the counter-probability for full transparency
                 if confidence_score is not None:
+                    # Display the main prediction and confidence using st.metric
+                    st.metric(
+                        label=f"{status_emoji} **{status_text}**", 
+                        value=f"{confidence_score * 100:.2f}%", 
+                        delta_color="off" # Turn off delta color for neutral display
+                    )
+                    
+                    # Display the counter-probability for full transparency
                     opposite_class = 1 - prediction
                     opposite_score = probabilities[opposite_class]
                     st.caption(f"Confidence for the {'Genuine (OR)' if opposite_class == 0 else 'Fake (CG)'} class: **{opposite_score * 100:.2f}%**")
+                else:
+                    st.warning("Could not calculate confidence score.")
 
         else:
             st.warning("👈 Please enter a review to begin the analysis.")
