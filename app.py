@@ -4,45 +4,54 @@ import re
 import os
 import nltk
 
-# --- NLTK Configuration (Uses Local Folder) ---
-# Set the NLTK data path to the local directory
+# --- NLTK Configuration (CRITICAL FIX FOR LookupError) ---
+
+# 1. Point NLTK to the uploaded 'nltk_data' folder
 nltk_data_path = os.path.join(os.getcwd(), 'nltk_data')
 if nltk_data_path not in nltk.data.path:
     nltk.data.path.append(nltk_data_path)
 
-# 2. Imports that rely on NLTK data MUST be inside the try/except block.
+# 2. Explicitly load the required NLTK data resources before importing components.
+# This ensures NLTK finds the models using the custom path.
 try:
+    # Attempt to find the necessary files. If they fail, the LookupError is raised here.
+    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('corpora/stopwords')
+    
+    # Now import the components that rely on the found data
     from nltk.corpus import stopwords
     from nltk.stem import PorterStemmer
     from nltk.tokenize import word_tokenize
     
-    # Initialize stemmer and stop words (English specific)
+    # Initialize stemmer and stop words
     stemmer = PorterStemmer()
     stop_words = set(stopwords.words('english'))
     
+    # Flag to indicate successful initialization
+    is_nltk_ready = True
+
 except LookupError:
-    # If data is missing (e.g., 'punkt' or 'stopwords'), raise an error
-    st.error("NLTK Data Error: Required data (punkt/stopwords) not found. "
-             "Ensure the 'nltk_data' folder is uploaded with the correct internal structure.")
+    # Handle the case where the NLTK data is not found
+    st.error("NLTK Data Error: Could not find 'punkt' or 'stopwords' in the 'nltk_data' folder. "
+             "Please ensure the folder is complete and structured correctly (e.g., nltk_data/tokenizers/punkt).")
     
-    # Set variables to None/empty to prevent crashes and halt prediction logic
+    # Disable prediction logic
     stemmer = None
     stop_words = set()
-    model = None 
-    tfidf_vectorizer = None 
-
+    is_nltk_ready = False
+    
 # --- Preprocessing Function ---
 
 def clean_text(text):
     """Applies the exact cleaning and stemming logic used during training."""
-    if not stemmer: # Check if initialization failed
-        return text 
+    if not is_nltk_ready:
+        return text # Return original text if cleaning failed
 
     # Convert to lowercase
     text = text.lower()
     # Remove punctuation
     text = re.sub(r'[^\w\s]', '', text)
-    # Tokenize
+    # Tokenize (This line caused the error, now protected by explicit find())
     tokens = word_tokenize(text)
     # Remove stop words and stem
     cleaned_tokens = [stemmer.stem(word) for word in tokens if word not in stop_words]
@@ -53,7 +62,6 @@ def clean_text(text):
 def load_assets():
     """Loads the trained model and TF-IDF vectorizer."""
     try:
-        # NOTE: Model and vectorizer loading is only attempted if NLTK initialization succeeded
         model = joblib.load('model.joblib')
         vectorizer = joblib.load('tfidf.joblib')
         return model, vectorizer
@@ -62,7 +70,7 @@ def load_assets():
         return None, None
 
 # Load assets only if NLTK data was successfully initialized
-if 'stemmer' in locals() and stemmer:
+if is_nltk_ready:
     model, tfidf_vectorizer = load_assets()
 else:
     model, tfidf_vectorizer = None, None
