@@ -122,11 +122,16 @@ if model and tfidf_vectorizer:
                     
                 st.markdown("### Analysis Result:")
                 
-                # --- Display Result with Percentage ---
+                # --- Display Result with Percentage (FIXED using st.markdown) ---
+                
                 if prediction == 1:
-                    st.error(f"❌ **PREDICTION: FAKE/DECEPTIVE REVIEW (CG)**{confidence_str}")
+                    # Use st.markdown with danger styling (red text) for visibility
+                    output_text = f"<p style='font-size: 20px; color: red;'>❌ <b>PREDICTION: FAKE/DECEPTIVE REVIEW (CG)</b>{confidence_str}</p>"
                 else:
-                    st.success(f"✅ **PREDICTION: GENUINE REVIEW (OR)**{confidence_str}")
+                    # Use st.markdown with success styling (green text)
+                    output_text = f"<p style='font-size: 20px; color: green;'>✅ <b>PREDICTION: GENUINE REVIEW (OR)</b>{confidence_str}</p>"
+                
+                st.markdown(output_text, unsafe_allow_html=True)
                 
                 # Display the counter-probability for full transparency
                 if confidence_score is not None:
