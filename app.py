@@ -226,21 +226,28 @@ if model and tfidf_vectorizer:
                 is_fake = prediction.lower() == 'cg'
                 
                 # Predict Probability (If available)
-                probability = None
+                probability_cg = None
+                probability_og = None
+                model_confidence = None
+                
                 if has_proba:
                     proba_array = model.predict_proba(vectorized_input)[0]
-                    # Assuming 'cg' is class 0 and 'og' is class 1 (check your model)
-                    # We'll calculate the probability of the predicted class
                     class_labels = model.classes_ 
                     
                     if 'cg' in class_labels and 'og' in class_labels:
                         
-                        # Find the index of the predicted class and its probability
-                        pred_index = np.where(class_labels == prediction)[0][0]
-                        probability = proba_array[pred_index]
+                        # Get indices for CG (Deceptive) and OG (Genuine)
+                        cg_index = np.where(class_labels == 'cg')[0][0]
+                        og_index = np.where(class_labels == 'og')[0][0]
+                        
+                        probability_cg = proba_array[cg_index]
+                        probability_og = proba_array[og_index]
+                        
+                        # Model Confidence is the probability of the predicted class
+                        model_confidence = probability_cg if is_fake else probability_og
                     else:
-                         # Fallback if class order is ambiguous
-                        probability = np.max(proba_array)
+                         # Fallback for confidence if class order is ambiguous
+                        model_confidence = np.max(proba_array)
 
                 # --- Feature Extraction ---
                 features = extract_auxiliary_features(review_input)
@@ -259,28 +266,33 @@ if model and tfidf_vectorizer:
                             padding: 20px; border-radius: 10px; 
                             border: 2px solid {status_color}; text-align: center;">
                     <h2 style="color: {status_color}; margin: 0;">{status_emoji} {status_text}</h2>
-                    {'<p style="color: #F44336;">**Confidence:** ' + f'{probability:.2%}' + '</p>' if probability is not None else ''}
+                    {'<p style="color: #616161; font-weight: normal;">Confidence in Prediction: ' + f'{model_confidence:.2%}' + '</p>' if model_confidence is not None else ''}
                 </div>
             """, unsafe_allow_html=True)
             
             st.markdown("### Confidence and Insights")
             
-            # 2. Confidence/Risk Metric
-            col_conf, col_risk = st.columns(2)
+            # 2. Confidence/Risk Metrics
+            col_conf, col_risk, col_genuine = st.columns(3)
             
-            if probability is not None:
-                risk_score = (probability * 100) if is_fake else (1 - probability) * 100
-                risk_level = "High" if risk_score > 75 else "Moderate" if risk_score > 50 else "Low"
+            if probability_cg is not None and probability_og is not None:
+                
+                risk_level = "High" if probability_cg > 0.75 else "Moderate" if probability_cg > 0.50 else "Low"
 
                 col_conf.metric(
                     "Model Confidence", 
-                    f"{probability:.2%}" if is_fake else f"{probability:.2%}",
+                    f"{model_confidence:.2%}",
                     delta=f"P({prediction.upper()})"
                 )
                 col_risk.metric(
                     "Deception Risk Score", 
-                    f"{risk_score:.2f}%" if is_fake else f"{100-risk_score:.2f}%",
+                    f"{probability_cg:.2%}",
                     delta=risk_level
+                )
+                col_genuine.metric(
+                    "Genuine Confidence Score",
+                    f"{probability_og:.2%}",
+                    delta=f"100% - {probability_cg:.2%}" # Show the difference
                 )
 
             # 3. Auxiliary Feature Metrics
@@ -312,4 +324,8 @@ if model and tfidf_vectorizer:
             st.warning("👈 Please enter a review to begin the analysis.")
 
 st.markdown("---")
+# Final Disclaimer
+st.caption("""
+**Disclaimer:** This system is an **experimental machine learning tool** and should not be used as the sole basis for business decisions. The "Deception Risk Score" is a statistical prediction based on linguistic patterns learned from a training dataset and is **not a guarantee** of the review's veracity. Always combine this result with human review and context.
+""")
 st.caption(f"App powered by Streamlit | Model: Logistic Regression | Last Analysis: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
