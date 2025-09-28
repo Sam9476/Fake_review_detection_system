@@ -21,7 +21,7 @@ try:
     nltk.data.find('corpora/stopwords')
     
     # Initialize stemmer and stop words
-    stemmer = PorterStemter()
+    stemmer = PorterStemmer()
     stop_words = set(stopwords.words('english'))
     is_nltk_ready = True
 
@@ -237,7 +237,6 @@ if model and tfidf_vectorizer:
                     if 'cg' in class_labels and 'og' in class_labels:
                         
                         # Get indices for CG (Deceptive) and OG (Genuine)
-                        # NOTE: Order depends on how the model was trained, but we find them by label.
                         cg_index = np.where(class_labels == 'cg')[0][0]
                         og_index = np.where(class_labels == 'og')[0][0]
                         
@@ -271,12 +270,12 @@ if model and tfidf_vectorizer:
                 </div>
             """, unsafe_allow_html=True)
             
-            # 2. Confidence/Risk Metrics (Now inside the analysis block)
-            st.markdown("### Confidence and Insights")
+            # 2. Confidence/Risk Metrics (Now displayed immediately after the main box)
             
-            col_conf, col_risk, col_genuine = st.columns(3)
-            
+            # Only display the confidence metrics if probabilities were calculated
             if probability_cg is not None and probability_og is not None:
+                st.markdown("### Confidence Scores")
+                col_conf, col_risk, col_genuine = st.columns(3)
                 
                 risk_level = "High" if probability_cg > 0.75 else "Moderate" if probability_cg > 0.50 else "Low"
 
@@ -293,8 +292,7 @@ if model and tfidf_vectorizer:
                 col_genuine.metric(
                     "Genuine Confidence Score",
                     f"{probability_og:.2%}",
-                    # Show probability of the other class as context
-                    delta=f"100% - {probability_cg:.2%}" 
+                    delta=f"100% - {probability_cg:.2%}"
                 )
 
             # 3. Auxiliary Feature Metrics
