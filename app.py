@@ -328,4 +328,4 @@ st.markdown("---")
 st.caption("""
 **Disclaimer:** This system is an **experimental machine learning tool** and should not be used as the sole basis for business decisions. The "Deception Risk Score" is a statistical prediction based on linguistic patterns learned from a training dataset and is **not a guarantee** of the review's veracity. Always combine this result with human review and context.
 """)
-st.caption(f"App powered by Streamlit | Model: Logistic Regression | Last Analysis: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"App powered by Streamlit | Model: Logistic Regression | Last Analysis: {datetime.now().strftime('%Y-%m-%d')}")
