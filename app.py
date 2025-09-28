@@ -5,58 +5,68 @@ import os
 import nltk
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
+from nltk.tokenize import RegexpTokenizer # Using RegexpTokenizer is the closest robust alternative
 
-# --- NLTK Configuration (Uses Local Folder - Fixed Tokenization) ---
+# --- NLTK Configuration (Uses Local Folder for speed) ---
 
-# 1. Set the path to the uploaded 'nltk_data' folder
+# Set the path to the uploaded 'nltk_data' folder
 nltk_data_path = os.path.join(os.getcwd(), 'nltk_data')
 if nltk_data_path not in nltk.data.path:
     nltk.data.path.append(nltk_data_path)
 
-# 2. CRITICAL FIX: Attempt to FIND the 'stopwords' resource.
-# We no longer need to find 'punkt' since we are using a custom tokenizer.
+# Check and Initialize NLTK components
 try:
-    # Explicitly find 'stopwords'
+    # Explicitly find 'stopwords' resource
     nltk.data.find('corpora/stopwords')
     
-    # Initialize stemmer and stop words (English components are required by the model)
+    # Initialize stemmer and stop words
     stemmer = PorterStemmer()
     stop_words = set(stopwords.words('english'))
+    
+    # Initialize tokenizer as close to word_tokenize as possible without punkt
+    # Note: If your model was trained purely on word_tokenize after simple punctuation removal,
+    # the RegexpTokenizer (or even a simple .split() after aggressive cleaning) is required here.
+    # We will use .split() for maximum compatibility with the aggressive cleaning from your notebook.
     is_nltk_ready = True
 
 except LookupError:
-    # If the LookupError persists, the uploaded folder structure for stopwords is incorrect.
     st.error(
         "NLTK DATA ERROR: Failed to locate 'stopwords' in the 'nltk_data' folder. "
-        "Please ensure the folder contains the correct structure (e.g., 'nltk_data/corpora/stopwords')."
+        "Prediction is disabled. Please ensure the folder is uploaded and structured correctly."
     )
-    # Disable prediction logic
     stemmer = None
     stop_words = set()
     is_nltk_ready = False
     
-# --- Preprocessing Function (Manual Tokenization Fix) ---
+# --- Preprocessing Function (Manual Tokenization to avoid Punkt error) ---
 
 def clean_text(text):
     """
-    Applies cleaning, stemming, and uses manual tokenization 
-    to avoid the problematic nltk.word_tokenize (punkt dependency).
+    Applies the exact cleaning and stemming logic from the notebook,
+    replacing word_tokenize with a safe alternative.
     """
     if not is_nltk_ready:
         return text 
 
-    # Convert to lowercase
+    # 1. Convert to lowercase
     text = text.lower()
     
-    # Remove punctuation and numbers (keep only letters and spaces)
-    text = re.sub(r'[^a-z\s]', '', text) 
+    # 2. Remove punctuation (THIS STEP FROM YOUR NOTEBOOK IS CRITICAL)
+    # The regex r'[^\w\s]' removes all non-word characters (including punctuation)
+    text = re.sub(r'[^\w\s]', ' ', text) # Replace with space to prevent word joining
     
-    # Tokenize using split() to avoid punkt dependency
-    # This creates tokens based on whitespace.
+    # 3. Tokenize (REPLACED word_tokenize with robust .split())
+    # Your original code: tokens = word_tokenize(text)
+    # Replacement:
     tokens = text.split() 
     
-    # Remove stop words and stem
-    cleaned_tokens = [stemmer.stem(word) for word in tokens if word not in stop_words and len(word) > 1]
+    # 4. Remove stop words and stem
+    cleaned_tokens = [
+        stemmer.stem(word) 
+        for word in tokens 
+        # Added len(word) > 1 check to remove single characters left after cleaning
+        if word not in stop_words and len(word) > 1
+    ]
     
     return ' '.join(cleaned_tokens)
 
@@ -65,6 +75,9 @@ def clean_text(text):
 def load_assets():
     """Loads the trained model and TF-IDF vectorizer."""
     try:
+        # Assumes model is 'model.joblib' and vectorizer is 'tfidf.joblib'
+        # NOTE: Your notebook uses LogisticRegression() and TfidfVectorizer(). 
+        # Ensure you saved the fitted vectorizer and the trained model using joblib.dump().
         model = joblib.load('model.joblib')
         vectorizer = joblib.load('tfidf.joblib')
         return model, vectorizer
@@ -81,7 +94,7 @@ else:
 # --- Streamlit Application Interface ---
 st.set_page_config(page_title="Fake Review Detector", layout="wide")
 st.title("🛡️ Web Hosting Review Detection System")
-st.markdown("A Machine Learning model trained to classify reviews as Genuine (OR) or Fake/Deceptive (CG).")
+st.markdown("A Machine Learning model trained to classify reviews as **Genuine (OR)** or **Fake/Deceptive (CG)**.")
 st.markdown("---")
 
 if model and tfidf_vectorizer:
@@ -104,31 +117,49 @@ if model and tfidf_vectorizer:
                 
                 cleaned_input = clean_text(review_input)
                 
-                # Vectorize 
+                # Transform the cleaned text using the fitted vectorizer
                 vectorized_input = tfidf_vectorizer.transform([cleaned_input])
                 
                 # Predict (1=Fake/CG, 0=Genuine/OR)
                 prediction = model.predict(vectorized_input)[0]
                 
-                # Get probability
+                # Get probabilities for both classes
                 try:
-                    # model.classes_ will determine if 0 or 1 is the index
-                    probability = model.predict_proba(vectorized_input)[0][prediction]
+                    probabilities = model.predict_proba(vectorized_input)[0]
+                    confidence_score = probabilities[prediction]
+                    
+                    # Prepare display variables
+                    is_fake = prediction == 1
+                    status_emoji = "❌" if is_fake else "✅"
+                    status_text = "FAKE/DECEPTIVE REVIEW (CG)" if is_fake else "GENUINE REVIEW (OR)"
+                    
                 except:
-                    probability = None
+                    confidence_score = None
+                    status_emoji = ""
+                    status_text = "Prediction Error"
                     
                 st.markdown("### Analysis Result:")
-
-                if prediction == 1:
-                    st.error(f"❌ **PREDICTION: FAKE/DECEPTIVE REVIEW** (CG)")
-                else:
-                    st.success(f"✅ **PREDICTION: GENUINE REVIEW** (OR)")
                 
-                if probability is not None:
+                # --- Display Prediction and Percentage using st.metric (Fix for display issue) ---
+                
+                if confidence_score is not None:
+                    # Display the main prediction and confidence
                     st.metric(
-                        label="Confidence Score", 
-                        value=f"{probability * 100:.2f}%"
+                        # Label includes the emoji and status text
+                        label=f"{status_emoji} **{status_text}**", 
+                        # Value shows the percentage
+                        value=f"{confidence_score * 100:.2f}%", 
+                        delta_color="off" 
                     )
+                    
+                    # Display the counter-probability for full transparency
+                    opposite_class = 1 - prediction
+                    opposite_score = probabilities[opposite_class]
+                    
+                    opposite_label = 'Fake (CG)' if opposite_class == 1 else 'Genuine (OR)'
+                    st.caption(f"Confidence for the opposing class ({opposite_label}): **{opposite_score * 100:.2f}%**")
+                else:
+                    st.warning("Could not calculate confidence score. Check your model's prediction output.")
 
         else:
             st.warning("👈 Please enter a review to begin the analysis.")
